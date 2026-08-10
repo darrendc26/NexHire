@@ -1,0 +1,46 @@
+# Environment and secret files
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+
+# Go build outputs and binaries
+backend/server
+server
+*.exe
+*.exe?
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+bin/
+dist/
+
+# Node.js and frontend dependencies / build artifacts
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+build/
+.cache/
+.parcel-cache/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE and Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.bak

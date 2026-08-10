@@ -1,0 +1,12 @@
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+
+# Binaries
+server
+*.exe
+*.test
+*.out
