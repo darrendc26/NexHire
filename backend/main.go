@@ -9,7 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gin-gonic/gin"
+
 	"nexhire/backend/auth"
+	"nexhire/backend/interview"
 	"nexhire/backend/middleware"
 )
 
@@ -34,12 +37,58 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+func extractTokenFromGin(c *gin.Context) string {
+	if cookie, err := c.Request.Cookie("auth_token"); err == nil && cookie.Value != "" {
+		return cookie.Value
+	}
+	authHeader := c.GetHeader("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		return strings.TrimPrefix(authHeader, "Bearer ")
+	}
+	return ""
+}
+
 func main() {
-	cfg := auth.LoadConfigFromEnv()
+	cfg := auth.Load()
 	authService := auth.NewService(cfg)
 	authHandler := auth.NewHandler(authService, cfg)
 
+	interviewRepo := interview.NewRepository()
+	interviewService := interview.NewService(interviewRepo)
+	interviewHandler := interview.NewHandler(interviewService)
+
+	ginEngine := gin.New()
+	ginEngine.Use(gin.Recovery())
+
+	api := ginEngine.Group("/api")
+
+	ginAuthMiddleware := func(c *gin.Context) {
+		tokenString := extractTokenFromGin(c)
+		if tokenString == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: missing token"})
+			c.Abort()
+			return
+		}
+
+		claims, err := authService.ValidateJWT(tokenString)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: " + err.Error()})
+			c.Abort()
+			return
+		}
+
+		c.Set("userID", claims.UserID)
+		c.Set("claims", claims)
+		c.Next()
+	}
+
+	interviewHandler.RegisterRoutes(api, ginAuthMiddleware)
+
 	mux := http.NewServeMux()
+
+	// Register interview Gin router on mux
+	mux.Handle("/api/interviews", ginEngine)
+	mux.Handle("/api/interviews/", ginEngine)
 
 	// Register auth routes
 	authHandler.RegisterRoutes(mux)
