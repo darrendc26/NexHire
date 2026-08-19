@@ -2,14 +2,16 @@ package auth
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"nexhire/backend/models"
 	"sync"
 	"time"
+
+	"nexhire/backend/models"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/oauth2"
@@ -29,6 +31,7 @@ type JWTClaims struct {
 type Service struct {
 	cfg          *Config
 	oauthConfig  *oauth2.Config
+	db           *sql.DB
 	usersMutex   sync.RWMutex
 	usersByID    map[string]*models.User
 	usersByEmail map[string]*models.User
@@ -36,6 +39,11 @@ type Service struct {
 
 // NewService initializes a new Auth Service with config
 func NewService(cfg *Config) *Service {
+	return NewServiceWithDB(cfg, nil)
+}
+
+// NewServiceWithDB initializes a new Auth Service with optional database connection
+func NewServiceWithDB(cfg *Config, db *sql.DB) *Service {
 	oauthCfg := &oauth2.Config{
 		ClientID:     cfg.GoogleClientID,
 		ClientSecret: cfg.GoogleClientSecret,
@@ -51,9 +59,15 @@ func NewService(cfg *Config) *Service {
 	return &Service{
 		cfg:          cfg,
 		oauthConfig:  oauthCfg,
+		db:           db,
 		usersByID:    make(map[string]*models.User),
 		usersByEmail: make(map[string]*models.User),
 	}
+}
+
+// SetDB attaches a database connection to the service
+func (s *Service) SetDB(db *sql.DB) {
+	s.db = db
 }
 
 // GetGoogleAuthURL generates the Google OAuth consent URL with a secure state string
@@ -125,16 +139,18 @@ func (s *Service) VerifyGoogleIDToken(ctx context.Context, idToken string) (*mod
 
 // GetOrCreateUser retrieves an existing user by email or creates a new one
 func (s *Service) GetOrCreateUser(ctx context.Context, profile *models.GoogleUserInfo) (*models.User, error) {
+	if s.db != nil {
+		return s.getOrCreateUserDB(ctx, profile)
+	}
+
 	s.usersMutex.Lock()
 	defer s.usersMutex.Unlock()
 
 	// Check if user already exists
 	if existing, ok := s.usersByEmail[profile.Email]; ok {
-		// Update profile info if changed
 		existing.Name = profile.Name
 		existing.Picture = profile.Picture
 		existing.GoogleID = profile.Sub
-		// existing.UpdatedAt = time.Now()
 		return existing, nil
 	}
 
@@ -148,11 +164,69 @@ func (s *Service) GetOrCreateUser(ctx context.Context, profile *models.GoogleUse
 		Name:      profile.Name,
 		Picture:   profile.Picture,
 		CreatedAt: now,
-		// UpdatedAt: now,
 	}
 
 	s.usersByID[userID] = newUser
 	s.usersByEmail[profile.Email] = newUser
+
+	return newUser, nil
+}
+
+func (s *Service) getOrCreateUserDB(ctx context.Context, profile *models.GoogleUserInfo) (*models.User, error) {
+	querySelect := `
+		SELECT id, google_id, email, name, picture, created_at
+		FROM users
+		WHERE email = $1
+	`
+
+	var user models.User
+	err := s.db.QueryRowContext(ctx, querySelect, profile.Email).Scan(
+		&user.ID,
+		&user.GoogleID,
+		&user.Email,
+		&user.Name,
+		&user.Picture,
+		&user.CreatedAt,
+	)
+
+	if err == nil {
+		// Update user profile info
+		queryUpdate := `
+			UPDATE users
+			SET google_id = $1, name = $2, picture = $3, updated_at = NOW()
+			WHERE id = $4
+		`
+		_, _ = s.db.ExecContext(ctx, queryUpdate, profile.Sub, profile.Name, profile.Picture, user.ID)
+		user.GoogleID = profile.Sub
+		user.Name = profile.Name
+		user.Picture = profile.Picture
+		return &user, nil
+	}
+
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("failed to query user from database: %w", err)
+	}
+
+	// User not found, create new user
+	now := time.Now()
+	userID := fmt.Sprintf("usr_%d", now.UnixNano())
+	newUser := &models.User{
+		ID:        userID,
+		GoogleID:  profile.Sub,
+		Email:     profile.Email,
+		Name:      profile.Name,
+		Picture:   profile.Picture,
+		CreatedAt: now,
+	}
+
+	queryInsert := `
+		INSERT INTO users (id, google_id, email, name, picture, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $6)
+	`
+	_, err = s.db.ExecContext(ctx, queryInsert, newUser.ID, newUser.GoogleID, newUser.Email, newUser.Name, newUser.Picture, newUser.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert new user into database: %w", err)
+	}
 
 	return newUser, nil
 }
@@ -206,6 +280,23 @@ func (s *Service) ValidateJWT(tokenString string) (*JWTClaims, error) {
 
 // GetUserByID fetches a user from storage by ID
 func (s *Service) GetUserByID(id string) (*models.User, bool) {
+	if s.db != nil {
+		query := `SELECT id, google_id, email, name, picture, created_at FROM users WHERE id = $1`
+		var user models.User
+		err := s.db.QueryRow(query, id).Scan(
+			&user.ID,
+			&user.GoogleID,
+			&user.Email,
+			&user.Name,
+			&user.Picture,
+			&user.CreatedAt,
+		)
+		if err == nil {
+			return &user, true
+		}
+		return nil, false
+	}
+
 	s.usersMutex.RLock()
 	defer s.usersMutex.RUnlock()
 

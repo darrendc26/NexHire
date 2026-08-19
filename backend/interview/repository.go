@@ -2,81 +2,190 @@ package interview
 
 import (
 	"context"
+	"database/sql"
 	"errors"
-	"sync"
+	"fmt"
+	"time"
 
 	"nexhire/backend/models"
 )
 
-type MemoryRepository struct {
-	mu         sync.RWMutex
-	interviews map[string]*models.Interview
+// PostgresRepository implements Repository using PostgreSQL database
+type PostgresRepository struct {
+	db *sql.DB
 }
 
-func NewRepository() Repository {
-	return &MemoryRepository{
-		interviews: make(map[string]*models.Interview),
+// NewPostgresRepository initializes a new PostgreSQL backed repository
+func NewPostgresRepository(db *sql.DB) Repository {
+	return &PostgresRepository{
+		db: db,
 	}
 }
 
-func (r *MemoryRepository) Create(ctx context.Context, interview *models.Interview) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+// NewRepository returns a PostgreSQL repository instance
+func NewRepository(db *sql.DB) Repository {
+	return NewPostgresRepository(db)
+}
 
-	if _, exists := r.interviews[interview.ID]; exists {
-		return errors.New("interview already exists")
+func (r *PostgresRepository) Create(ctx context.Context, interview *models.Interview) error {
+	if interview.CreatedAt.IsZero() {
+		interview.CreatedAt = time.Now()
 	}
 
-	r.interviews[interview.ID] = interview
+	query := `
+		INSERT INTO interviews (id, recruiter_id, title, role, description, difficulty, duration, voice_enabled, status, share_token, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	`
+
+	_, err := r.db.ExecContext(
+		ctx,
+		query,
+		interview.ID,
+		interview.RecruiterID,
+		interview.Title,
+		interview.Role,
+		interview.Description,
+		interview.Difficulty,
+		interview.Duration,
+		interview.VoiceEnabled,
+		interview.Status,
+		interview.ShareToken,
+		interview.CreatedAt,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to create interview in postgres: %w", err)
+	}
+
 	return nil
 }
 
-func (r *MemoryRepository) GetByID(ctx context.Context, id string) (*models.Interview, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+func (r *PostgresRepository) GetByID(ctx context.Context, id string) (*models.Interview, error) {
+	query := `
+		SELECT id, recruiter_id, title, role, description, difficulty, duration, voice_enabled, status, share_token, created_at
+		FROM interviews
+		WHERE id = $1
+	`
 
-	interview, exists := r.interviews[id]
-	if !exists {
-		return nil, errors.New("interview not found")
-	}
+	var i models.Interview
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&i.ID,
+		&i.RecruiterID,
+		&i.Title,
+		&i.Role,
+		&i.Description,
+		&i.Difficulty,
+		&i.Duration,
+		&i.VoiceEnabled,
+		&i.Status,
+		&i.ShareToken,
+		&i.CreatedAt,
+	)
 
-	return interview, nil
-}
-
-func (r *MemoryRepository) GetByRecruiterID(ctx context.Context, recruiterID string) ([]models.Interview, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	var result []models.Interview
-	for _, interview := range r.interviews {
-		if interview.RecruiterID == recruiterID {
-			result = append(result, *interview)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("interview not found")
 		}
+		return nil, fmt.Errorf("failed to fetch interview: %w", err)
 	}
 
-	return result, nil
+	return &i, nil
 }
 
-func (r *MemoryRepository) Update(ctx context.Context, interview *models.Interview) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (r *PostgresRepository) GetByRecruiterID(ctx context.Context, recruiterID string) ([]models.Interview, error) {
+	query := `
+		SELECT id, recruiter_id, title, role, description, difficulty, duration, voice_enabled, status, share_token, created_at
+		FROM interviews
+		WHERE recruiter_id = $1
+		ORDER BY created_at DESC
+	`
 
-	if _, exists := r.interviews[interview.ID]; !exists {
-		return errors.New("interview not found")
+	rows, err := r.db.QueryContext(ctx, query, recruiterID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch recruiter interviews: %w", err)
+	}
+	defer rows.Close()
+
+	var interviews []models.Interview
+	for rows.Next() {
+		var i models.Interview
+		if err := rows.Scan(
+			&i.ID,
+			&i.RecruiterID,
+			&i.Title,
+			&i.Role,
+			&i.Description,
+			&i.Difficulty,
+			&i.Duration,
+			&i.VoiceEnabled,
+			&i.Status,
+			&i.ShareToken,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan interview row: %w", err)
+		}
+		interviews = append(interviews, i)
 	}
 
-	r.interviews[interview.ID] = interview
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating interview rows: %w", err)
+	}
+
+	return interviews, nil
+}
+
+func (r *PostgresRepository) Update(ctx context.Context, interview *models.Interview) error {
+	query := `
+		UPDATE interviews
+		SET title = $1, role = $2, description = $3, difficulty = $4, duration = $5, voice_enabled = $6, status = $7, updated_at = NOW()
+		WHERE id = $8 AND recruiter_id = $9
+	`
+
+	res, err := r.db.ExecContext(
+		ctx,
+		query,
+		interview.Title,
+		interview.Role,
+		interview.Description,
+		interview.Difficulty,
+		interview.Duration,
+		interview.VoiceEnabled,
+		interview.Status,
+		interview.ID,
+		interview.RecruiterID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update interview: %w", err)
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return errors.New("interview not found or unauthorized")
+	}
+
 	return nil
 }
 
-func (r *MemoryRepository) Delete(ctx context.Context, id string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (r *PostgresRepository) Delete(ctx context.Context, id string) error {
+	query := `DELETE FROM interviews WHERE id = $1`
 
-	if _, exists := r.interviews[id]; !exists {
+	res, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete interview: %w", err)
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
 		return errors.New("interview not found")
 	}
 
-	delete(r.interviews, id)
 	return nil
 }

@@ -58,7 +58,8 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"interview": interview,
+		"interview":  interview,
+		"share_link": "http://localhost:8080/api/candidates/token/" + interview.ShareToken,
 	})
 }
 

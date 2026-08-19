@@ -75,7 +75,7 @@ func (s *Service) Create(
 		Difficulty:   req.Difficulty,
 		Duration:     req.Duration,
 		VoiceEnabled: req.VoiceEnabled,
-		Status:       models.Draft,
+		Status:       models.Active,
 		ShareToken:   shareToken,
 	}
 	if err := s.repo.Create(ctx, newInterview); err != nil {

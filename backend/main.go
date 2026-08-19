@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -10,8 +11,10 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	_ "github.com/lib/pq"
 
 	"nexhire/backend/auth"
+	"nexhire/backend/candidate"
 	"nexhire/backend/interview"
 	"nexhire/backend/middleware"
 )
@@ -48,14 +51,62 @@ func extractTokenFromGin(c *gin.Context) string {
 	return ""
 }
 
+func initDatabase(dbURL string) (*sql.DB, error) {
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open postgres database: %w", err)
+	}
+
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping postgres database: %w", err)
+	}
+
+	// Try reading init.sql from relative paths
+	initPaths := []string{"init.sql", "./init.sql", "../init.sql"}
+	var initSQL []byte
+	for _, p := range initPaths {
+		if content, err := os.ReadFile(p); err == nil {
+			initSQL = content
+			break
+		}
+	}
+
+	if len(initSQL) > 0 {
+		if _, err := db.Exec(string(initSQL)); err != nil {
+			log.Printf("⚠️ Warning: schema init.sql execution error: %v", err)
+		} else {
+			log.Println("✅ Database schema initialized from init.sql")
+		}
+	}
+
+	return db, nil
+}
+
 func main() {
 	cfg := auth.Load()
-	authService := auth.NewService(cfg)
+
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = "postgres://postgres:postgrespassword@localhost:5433/nexhire?sslmode=disable"
+	}
+
+	db, err := initDatabase(dbURL)
+	if err != nil {
+		log.Fatalf("❌ Fatal: PostgreSQL connection failed: %v", err)
+	}
+
+	log.Println("🐘 Connected to PostgreSQL successfully!")
+	interviewRepo := interview.NewPostgresRepository(db)
+	candidateRepo := candidate.NewPostgresRepository(db)
+
+	authService := auth.NewServiceWithDB(cfg, db)
 	authHandler := auth.NewHandler(authService, cfg)
 
-	interviewRepo := interview.NewRepository()
 	interviewService := interview.NewService(interviewRepo)
 	interviewHandler := interview.NewHandler(interviewService)
+
+	candidateService := candidate.NewService(candidateRepo)
+	candidateHandler := candidate.NewHandler(candidateService)
 
 	ginEngine := gin.New()
 	ginEngine.Use(gin.Recovery())
@@ -83,12 +134,15 @@ func main() {
 	}
 
 	interviewHandler.RegisterRoutes(api, ginAuthMiddleware)
+	candidateHandler.RegisterRoutes(api)
 
 	mux := http.NewServeMux()
 
-	// Register interview Gin router on mux
+	// Register Gin routers on mux
 	mux.Handle("/api/interviews", ginEngine)
 	mux.Handle("/api/interviews/", ginEngine)
+	mux.Handle("/api/candidates", ginEngine)
+	mux.Handle("/api/candidates/", ginEngine)
 
 	// Register auth routes
 	authHandler.RegisterRoutes(mux)

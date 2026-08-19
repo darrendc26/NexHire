@@ -37,6 +37,8 @@ type CandidateSession struct {
 	InterviewID string        `json:"interview_id"`
 	Name        string        `json:"name"`
 	Email       string        `json:"email"`
+	TokenHash   string        `json:"-"`
+	RawToken    string        `json:"session_token,omitempty"`
 	Status      SessionStatus `json:"status"`
 	StartedAt   time.Time     `json:"started_at"`
 	FinishedAt  *time.Time    `json:"finished_at"`
