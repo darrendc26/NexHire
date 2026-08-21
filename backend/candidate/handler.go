@@ -41,6 +41,9 @@ func (h *Handler) StartSession(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
+		"session_id":    session.ID,
+		"session_token": session.RawToken,
+		"status":       string(session.Status),
 		"session": StartSessionResponse{
 			SessionID:    session.ID,
 			SessionToken: session.RawToken,
@@ -98,7 +101,89 @@ func (h *Handler) GetInterviewByShareToken(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"interview": interview})
+	c.JSON(http.StatusOK, gin.H{
+		"interview": interview,
+		"title":       interview.Title,
+		"role":        interview.Role,
+		"difficulty":  interview.Difficulty,
+		"duration":    interview.Duration,
+		"description": interview.Description,
+		"status":      interview.Status,
+	})
+}
+
+type SubmitAnswerRequest struct {
+	Answer string `json:"answer" binding:"required"`
+}
+
+func (h *Handler) StartSessionQuestion(c *gin.Context) {
+	token := c.Param("token")
+	if token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session token is required"})
+		return
+	}
+
+	resp, err := h.service.StartSessionQuestion(c.Request.Context(), token)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handler) SubmitAnswer(c *gin.Context) {
+	token := c.Param("token")
+	if token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session token is required"})
+		return
+	}
+
+	var req SubmitAnswerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	resp, err := h.service.SubmitAnswer(c.Request.Context(), token, req.Answer)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handler) GetReport(c *gin.Context) {
+	token := c.Param("token")
+	if token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session token is required"})
+		return
+	}
+
+	report, err := h.service.GetReport(c.Request.Context(), token)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"report": report})
+}
+
+func (h *Handler) GetReportBySessionID(c *gin.Context) {
+	sessionID := c.Param("sessionID")
+	if sessionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session ID is required"})
+		return
+	}
+
+	report, err := h.service.GetReportBySessionID(c.Request.Context(), sessionID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"report": report})
 }
 
 // CandidateAuthMiddleware authenticates candidate requests using Bearer raw session token and sets "candidateSession" in gin Context
@@ -140,6 +225,8 @@ func CandidateAuthMiddleware(service *Service) gin.HandlerFunc {
 }
 
 func (h *Handler) RegisterRoutes(router *gin.RouterGroup) {
+	router.GET("/interviews/share/:shareToken", h.GetInterviewByShareToken)
+
 	candidates := router.Group("/candidates")
 
 	candidates.POST("", h.StartSession)
@@ -148,4 +235,12 @@ func (h *Handler) RegisterRoutes(router *gin.RouterGroup) {
 	candidates.GET("/session/token/:token", h.GetSessionByToken)
 	candidates.GET("/:id", h.GetSessionByID)
 	candidates.GET("/interview/:interviewID", h.GetSessionsByInterviewID)
+	candidates.GET("/reports/:sessionID", h.GetReportBySessionID)
+
+	// AI turn & report routes
+	candidates.POST("/sessions/:token/start", h.StartSessionQuestion)
+	candidates.POST("/sessions/:token/answer", h.SubmitAnswer)
+	candidates.GET("/sessions/:token/report", h.GetReport)
 }
+
+

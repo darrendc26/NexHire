@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -12,7 +13,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
+	"google.golang.org/genai"
 
+	"nexhire/backend/ai"
 	"nexhire/backend/auth"
 	"nexhire/backend/candidate"
 	"nexhire/backend/interview"
@@ -99,13 +102,33 @@ func main() {
 	interviewRepo := interview.NewPostgresRepository(db)
 	candidateRepo := candidate.NewPostgresRepository(db)
 
+	var aiService *ai.Service
+	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
+	if geminiAPIKey != "" {
+		ctx := context.Background()
+		client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: geminiAPIKey})
+		if err != nil {
+			log.Printf("⚠️ Warning: Failed to initialize Gemini API client: %v", err)
+		} else {
+			geminiModel := os.Getenv("GEMINI_MODEL")
+			if geminiModel == "" {
+				geminiModel = "gemini-3.5-flash-lite"
+			}
+			provider := ai.NewGeminiProvider(client, geminiModel)
+			aiService = ai.NewService(provider)
+			log.Printf("✨ Gemini AI provider initialized with model %s!", geminiModel)
+		}
+	} else {
+		log.Println("⚠️ Notice: GEMINI_API_KEY not set in environment.")
+	}
+
 	authService := auth.NewServiceWithDB(cfg, db)
 	authHandler := auth.NewHandler(authService, cfg)
 
 	interviewService := interview.NewService(interviewRepo)
 	interviewHandler := interview.NewHandler(interviewService)
 
-	candidateService := candidate.NewService(candidateRepo)
+	candidateService := candidate.NewService(candidateRepo, aiService)
 	candidateHandler := candidate.NewHandler(candidateService)
 
 	ginEngine := gin.New()

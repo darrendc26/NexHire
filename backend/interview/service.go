@@ -125,3 +125,17 @@ func (s *Service) GetByRecruiterID(ctx context.Context, recruiterID string) ([]m
 	}
 	return interviews, nil
 }
+
+func (s *Service) Delete(ctx context.Context, id string, recruiterID string) error {
+	interview, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	if interview.RecruiterID != recruiterID {
+		return errors.New("you are not authorized to delete this interview")
+	}
+
+	return s.repo.Delete(ctx, id)
+}
+

@@ -129,6 +129,29 @@ func (h *Handler) Get(c *gin.Context) {
 	})
 }
 
+func (h *Handler) Delete(c *gin.Context) {
+	id := c.Param("id")
+
+	rawUserID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	recruiterID, ok := rawUserID.(string)
+	if !ok || recruiterID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user"})
+		return
+	}
+
+	if err := h.service.Delete(c.Request.Context(), id, recruiterID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "interview deleted successfully"})
+}
+
 func (h *Handler) RegisterRoutes(
 	router *gin.RouterGroup,
 	authMiddleware gin.HandlerFunc,
@@ -142,5 +165,7 @@ func (h *Handler) RegisterRoutes(
 		interviews.POST("", h.Create)
 		interviews.GET("", h.GetMyInterviews)
 		interviews.GET("/:id", h.Get)
+		interviews.DELETE("/:id", h.Delete)
 	}
 }
+
