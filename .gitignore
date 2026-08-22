@@ -1,11 +1,15 @@
-# Environment and secret files
+# =========================
+# Environment / secrets
+# =========================
 .env
 .env.local
 .env.*.local
 *.env
 !.env.example
 
-# Go build outputs and binaries
+# =========================
+# Go build outputs / binaries
+# =========================
 backend/server
 server
 *.exe
@@ -16,19 +20,42 @@ server
 *.test
 *.out
 bin/
+
+# =========================
+# Node.js / frontend
+# =========================
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Build outputs
+build/
 dist/
 
-# Node.js and frontend dependencies / build artifacts
-node_modules/
+# Caches
+.cache/
+.parcel-cache/
+.turbo/
+
+# Package manager logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.pnpm-debug.log*
-build/
-.cache/
-.parcel-cache/
+pnpm-debug.log*
 
+# TypeScript
+*.tsbuildinfo
+
+# =========================
+# Test / coverage
+# =========================
+coverage/
+
+# =========================
 # OS generated files
+# =========================
 .DS_Store
 .DS_Store?
 ._*
@@ -37,7 +64,9 @@ build/
 ehthumbs.db
 Thumbs.db
 
-# IDE and Editor files
+# =========================
+# IDE / Editor
+# =========================
 .idea/
 .vscode/
 *.swp

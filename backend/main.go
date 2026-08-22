@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -190,29 +189,6 @@ func main() {
 		})
 	})))
 
-	// Serve static frontend files
-	frontendDir := getFrontendDir()
-	fs := http.FileServer(http.Dir(frontendDir))
-
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// If requesting API routes, let multiplexer handle standard 404
-		if strings.HasPrefix(r.URL.Path, "/api/") {
-			http.NotFound(w, r)
-			return
-		}
-
-		// Handle OAuth callback URL path route if loaded via frontend SPA route like /auth/success
-		requestedPath := filepath.Join(frontendDir, r.URL.Path)
-		info, err := os.Stat(requestedPath)
-		if err == nil && !info.IsDir() {
-			fs.ServeHTTP(w, r)
-			return
-		}
-
-		// Fallback to index.html for SPA routing
-		http.ServeFile(w, r, filepath.Join(frontendDir, "index.html"))
-	})
-
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -221,27 +197,6 @@ func main() {
 	handler := corsMiddleware(mux)
 
 	fmt.Printf("🚀 NexHire Backend Auth Server running on http://localhost:%s\n", port)
-	fmt.Printf("📁 Serving frontend from: %s\n", frontendDir)
 	log.Fatal(http.ListenAndServe(":"+port, handler))
 }
 
-func getFrontendDir() string {
-	// Check relative to current working directory
-	candidates := []string{
-		"../frontend",
-		"./frontend",
-		"frontend",
-	}
-
-	for _, c := range candidates {
-		if abs, err := filepath.Abs(c); err == nil {
-			if info, err := os.Stat(abs); err == nil && info.IsDir() {
-				return abs
-			}
-		}
-	}
-
-	// Default fallback to ../frontend
-	abs, _ := filepath.Abs("../frontend")
-	return abs
-}

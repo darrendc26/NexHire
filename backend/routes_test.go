@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -157,25 +155,6 @@ func setupTestServer(t *testing.T) (*httptest.Server, *sql.DB) {
 		})
 	})))
 
-	frontendDir := getFrontendDir()
-	fs := http.FileServer(http.Dir(frontendDir))
-
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") {
-			http.NotFound(w, r)
-			return
-		}
-
-		requestedPath := filepath.Join(frontendDir, r.URL.Path)
-		info, err := os.Stat(requestedPath)
-		if err == nil && !info.IsDir() {
-			fs.ServeHTTP(w, r)
-			return
-		}
-
-		http.ServeFile(w, r, filepath.Join(frontendDir, "index.html"))
-	})
-
 	handler := corsMiddleware(mux)
 	ts := httptest.NewServer(handler)
 	return ts, db
@@ -222,15 +201,15 @@ func TestAllRoutes(t *testing.T) {
 
 	testJWT, testUser := getTestJWTWithDB(t, db)
 
-	// 1. GET / (Frontend static file)
-	t.Run("GET / (Frontend index.html)", func(t *testing.T) {
+	// 1. GET / (Unhandled root returns 404 Not Found)
+	t.Run("GET / (returns 404 Not Found)", func(t *testing.T) {
 		resp, err := client.Get(testServerURL + "/")
 		if err != nil {
 			t.Fatalf("Failed GET /: %v", err)
 		}
 		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("Expected 200 OK, got %d", resp.StatusCode)
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("Expected 404 Not Found, got %d", resp.StatusCode)
 		}
 	})
 
