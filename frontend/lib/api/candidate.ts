@@ -182,3 +182,21 @@ export async function getCandidateReport(sessionToken: string): Promise<Candidat
   return data.report || null;
 }
 
+export async function getSTTToken(sessionToken: string): Promise<string> {
+  const res = await fetch(`${BASE_URL}/api/candidates/sessions/${encodeURIComponent(sessionToken)}/stt-token`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${sessionToken}`,
+    },
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Failed to fetch STT token (status ${res.status})`);
+  }
+
+  const data = await res.json();
+  return data.token || '';
+}
+

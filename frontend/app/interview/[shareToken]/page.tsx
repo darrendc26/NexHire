@@ -8,6 +8,7 @@ import {
   startInterviewSession,
   submitAnswer as submitAnswerAPI,
   getCandidateReport,
+  getSTTToken,
   InterviewDetails,
   Question as QuestionType,
   SessionProgress,
@@ -15,8 +16,8 @@ import {
 } from '@/lib/api/candidate';
 import InterviewLanding from './components/InterviewLanding';
 import CandidateForm from './components/CandidateForm';
-import Question from './components/Question';
-import AnswerInput from './components/AnswerInput';
+import DeviceTest from './components/DeviceTest';
+import VoiceAgentRoom from './components/VoiceAgentRoom';
 import Timer from './components/Timer';
 import {
   Bot,
@@ -32,9 +33,12 @@ import {
   ThumbsUp,
   ThumbsDown,
   BarChart,
+  ShieldAlert,
+  Maximize2,
+  Lock,
 } from 'lucide-react';
 
-type Step = 'landing' | 'instructions' | 'register' | 'interview' | 'completed';
+type Step = 'landing' | 'instructions' | 'register' | 'device-test' | 'interview' | 'completed';
 
 export default function CandidateInterviewPage() {
   const params = useParams();
@@ -46,6 +50,8 @@ export default function CandidateInterviewPage() {
   const [error, setError] = useState<string | null>(null);
 
   // Session state
+  const [candidateName, setCandidateName] = useState('');
+  const [candidateEmail, setCandidateEmail] = useState('');
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [creatingSession, setCreatingSession] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
@@ -61,6 +67,56 @@ export default function CandidateInterviewPage() {
   const [report, setReport] = useState<CandidateReport | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
 
+  // STT Token state
+  const [deepgramToken, setDeepgramToken] = useState<string>('');
+
+  // Fullscreen & Anti-Cheating Proctoring state
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [tabSwitchCount, setTabSwitchCount] = useState(0);
+  const [showFullscreenModal, setShowFullscreenModal] = useState(false);
+
+  const enterFullscreen = async () => {
+    try {
+      if (document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen();
+      }
+      setIsFullscreen(true);
+      setShowFullscreenModal(false);
+    } catch (err) {
+      console.warn('Fullscreen request prevented by browser policy:', err);
+      setIsFullscreen(true);
+      setShowFullscreenModal(false);
+    }
+  };
+
+  useEffect(() => {
+    if (step !== 'interview') return;
+
+    const handleFullscreenChange = () => {
+      const isFull = !!document.fullscreenElement;
+      setIsFullscreen(isFull);
+      if (!isFull) {
+        setTabSwitchCount((prev) => prev + 1);
+        setShowFullscreenModal(true);
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setTabSwitchCount((prev) => prev + 1);
+        setShowFullscreenModal(true);
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [step]);
+
   useEffect(() => {
     if (shareToken) {
       loadInterview();
@@ -68,7 +124,20 @@ export default function CandidateInterviewPage() {
   }, [shareToken]);
 
   useEffect(() => {
+    if (sessionToken) {
+      getSTTToken(sessionToken)
+        .then((token) => {
+          if (token) setDeepgramToken(token);
+        })
+        .catch((err) => console.error('Failed to load STT token:', err));
+    }
+  }, [sessionToken]);
+
+  useEffect(() => {
     if (step === 'completed' && sessionToken) {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
       loadReport(sessionToken);
     }
   }, [step, sessionToken]);
@@ -110,11 +179,18 @@ export default function CandidateInterviewPage() {
     setStep('register');
   };
 
-  const handleCandidateRegister = async (name: string, email: string) => {
+  const handleCandidateRegister = async (name: string, email: string): Promise<void> => {
+    setCandidateName(name);
+    setCandidateEmail(email);
+    setStep('device-test');
+  };
+
+  const handleStartInterviewSession = async () => {
+    if (!candidateName || !candidateEmail) return;
     setCreatingSession(true);
     setRegisterError(null);
     try {
-      const sessionRes = await createCandidateSession(shareToken, name, email);
+      const sessionRes = await createCandidateSession(shareToken, candidateName, candidateEmail);
       const token = sessionRes.session_token;
       setSessionToken(token);
 
@@ -122,13 +198,24 @@ export default function CandidateInterviewPage() {
       const startRes = await startInterviewSession(token);
       setCurrentQuestion(startRes.question);
       setProgress(startRes.progress);
+
+      // Fetch STT token before launching interview step
+      try {
+        const stt = await getSTTToken(token);
+        if (stt) setDeepgramToken(stt);
+      } catch (sttErr) {
+        console.error('Failed to pre-fetch STT token:', sttErr);
+      }
+
       setStep('interview');
+      enterFullscreen();
     } catch (err: unknown) {
       if (err instanceof Error) {
         setRegisterError(err.message);
       } else {
         setRegisterError('Failed to create candidate session.');
       }
+      setStep('register');
     } finally {
       setCreatingSession(false);
     }
@@ -273,6 +360,20 @@ export default function CandidateInterviewPage() {
                     </p>
                   </div>
                 </div>
+
+                <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                  <div style={{ background: '#fff7ed', padding: '0.6rem', borderRadius: '8px' }}>
+                    <Lock size={20} color="#ea580c" />
+                  </div>
+                  <div>
+                    <h4 style={{ fontWeight: 600, fontSize: '0.95rem', marginBottom: '0.2rem', color: 'var(--text-main)' }}>
+                      Proctored Locked Fullscreen Mode
+                    </h4>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', lineHeight: 1.5 }}>
+                      The session requires Fullscreen Mode to prevent tab switching or external AI tool usage during testing.
+                    </p>
+                  </div>
+                </div>
               </div>
 
               <button onClick={handleProceedToForm} className="btn-primary" id="btn-proceed-to-form">
@@ -286,38 +387,136 @@ export default function CandidateInterviewPage() {
           <CandidateForm onSubmit={handleCandidateRegister} loading={creatingSession} error={registerError} />
         )}
 
+        {step === 'device-test' && (
+          <DeviceTest
+            candidateName={candidateName}
+            onProceed={handleStartInterviewSession}
+            loading={creatingSession}
+          />
+        )}
+
         {step === 'interview' && (
-          <div className="container" style={{ maxWidth: '720px' }}>
-            <div className="glass-card">
-              {questionError && (
+          <>
+            {/* Proctored Fullscreen Warning Overlay */}
+            {(!isFullscreen || showFullscreenModal) && (
+              <div
+                style={{
+                  position: 'fixed',
+                  inset: 0,
+                  zIndex: 9999,
+                  background: 'rgba(15, 23, 42, 0.92)',
+                  backdropFilter: 'blur(12px)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '1.5rem',
+                }}
+              >
                 <div
+                  className="glass-card"
                   style={{
-                    background: '#fef2f2',
-                    border: '1px solid #fecaca',
-                    color: '#991b1b',
-                    padding: '0.75rem 1rem',
-                    borderRadius: '8px',
-                    fontSize: '0.875rem',
-                    marginBottom: '1.25rem',
+                    maxWidth: '480px',
+                    width: '100%',
+                    textAlign: 'center',
+                    background: '#ffffff',
+                    border: '2px solid #ef4444',
+                    borderRadius: '16px',
+                    padding: '2rem',
+                    boxShadow: '0 25px 50px -12px rgba(239, 68, 68, 0.25)',
                   }}
                 >
-                  {questionError}
-                </div>
-              )}
+                  <div
+                    style={{
+                      width: '64px',
+                      height: '64px',
+                      borderRadius: '50%',
+                      background: '#fef2f2',
+                      border: '2px solid #fecaca',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      margin: '0 auto 1.25rem',
+                    }}
+                  >
+                    <ShieldAlert size={34} color="#dc2626" />
+                  </div>
 
-              {currentQuestion ? (
-                <>
-                  <Question question={currentQuestion} />
-                  <AnswerInput onSubmit={handleSubmitAnswer} submitting={submittingAnswer} />
-                </>
-              ) : (
-                <div className="loading-container" style={{ padding: '2rem' }}>
-                  <div className="spinner"></div>
-                  <p className="pulse-text">Generating Next Question...</p>
+                  <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#1e293b', marginBottom: '0.5rem' }}>
+                    Proctored Interview Alert
+                  </h2>
+
+                  <p style={{ color: '#475569', fontSize: '0.9rem', lineHeight: 1.6, marginBottom: '1.25rem' }}>
+                    To ensure test integrity and prevent external LLM usage or secondary tab switching, this interview must be conducted in Fullscreen Mode.
+                  </p>
+
+                  {tabSwitchCount > 0 && (
+                    <div
+                      style={{
+                        background: '#fff7ed',
+                        border: '1px solid #fed7aa',
+                        color: '#c2410c',
+                        padding: '0.6rem 0.85rem',
+                        borderRadius: '8px',
+                        fontSize: '0.825rem',
+                        fontWeight: 600,
+                        marginBottom: '1.5rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                      }}
+                    >
+                      <Lock size={15} /> Tab / Window Switches Recorded: {tabSwitchCount}
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={enterFullscreen}
+                    className="btn-primary"
+                    style={{ width: '100%', padding: '0.85rem', fontSize: '0.95rem' }}
+                  >
+                    <Maximize2 size={18} /> Re-enter Fullscreen Mode
+                  </button>
                 </div>
-              )}
+              </div>
+            )}
+
+            <div className="container" style={{ maxWidth: '720px' }}>
+              <div className="glass-card">
+                {questionError && (
+                  <div
+                    style={{
+                      background: '#fef2f2',
+                      border: '1px solid #fecaca',
+                      color: '#991b1b',
+                      padding: '0.75rem 1rem',
+                      borderRadius: '8px',
+                      fontSize: '0.875rem',
+                      marginBottom: '1.25rem',
+                    }}
+                  >
+                    {questionError}
+                  </div>
+                )}
+
+                {currentQuestion ? (
+                  <VoiceAgentRoom
+                    question={currentQuestion}
+                    deepgramToken={deepgramToken}
+                    sessionToken={sessionToken || ''}
+                    onSubmitAnswer={handleSubmitAnswer}
+                    submitting={submittingAnswer}
+                    questionNumber={currentQuestion.order}
+                  />
+                ) : (
+                  <div className="loading-container" style={{ padding: '2rem' }}>
+                    <div className="spinner"></div>
+                    <p className="pulse-text">Generating Next Question...</p>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          </>
         )}
 
         {step === 'completed' && (
