@@ -325,3 +325,71 @@ func TestCandidateService_FullInterviewTurnCycle(t *testing.T) {
 		t.Errorf("Expected recommendation 'hire', got %s", rep.Recommendation)
 	}
 }
+
+func TestCandidateService_ValidateActiveSession(t *testing.T) {
+	repo := newMockRepo()
+	svc := NewService(repo, nil)
+	ctx := context.Background()
+
+	// 1. Active Interview & Session
+	interview := &models.Interview{
+		ID:         "int_active",
+		Status:     models.Active,
+		ShareToken: "st_active",
+		Role:       "Go Dev",
+	}
+	repo.interviews[interview.ID] = interview
+
+	session, err := svc.StartSession(ctx, "st_active", StartSessionRequest{
+		Name:  "Test User",
+		Email: "test@example.com",
+	})
+	if err != nil {
+		t.Fatalf("StartSession failed: %v", err)
+	}
+
+	token := session.RawToken
+
+	// Should pass when session is active and interview is active
+	valSess, valInt, err := svc.ValidateActiveSession(ctx, token)
+	if err != nil {
+		t.Fatalf("Expected ValidateActiveSession to succeed, got %v", err)
+	}
+	if valSess.ID != session.ID || valInt.ID != interview.ID {
+		t.Errorf("Mismatch in validated session or interview")
+	}
+
+	// 2. Closed Interview
+	closedInterview := &models.Interview{
+		ID:         "int_closed",
+		Status:     models.Closed,
+		ShareToken: "st_closed",
+	}
+	repo.interviews[closedInterview.ID] = closedInterview
+
+	closedSession, _ := svc.StartSession(ctx, "st_closed", StartSessionRequest{
+		Name:  "Test User 2",
+		Email: "test2@example.com",
+	})
+	if closedSession != nil {
+		// Attempt direct validation on closed interview session
+		_, _, err = svc.ValidateActiveSession(ctx, closedSession.RawToken)
+		if err == nil {
+			t.Errorf("Expected error for closed interview")
+		}
+	}
+
+	// 3. Completed Session
+	now := time.Now()
+	repo.UpdateSessionStatus(ctx, session.ID, models.SessionCompleted, &now)
+	_, _, err = svc.ValidateActiveSession(ctx, token)
+	if err == nil {
+		t.Errorf("Expected error for completed session")
+	}
+
+	// 4. Invalid Token
+	_, _, err = svc.ValidateActiveSession(ctx, "non_existent_token")
+	if err == nil {
+		t.Errorf("Expected error for non-existent token")
+	}
+}

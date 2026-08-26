@@ -135,7 +135,7 @@ func (h *Handler) HandleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Redirect back to frontend
-	redirectURL := h.cfg.FrontendURL + "/auth/success?token=" + tokenString
+	redirectURL := h.cfg.FrontendURL + "/dashboard"
 	http.Redirect(w, r, redirectURL, http.StatusSeeOther)
 }
 

@@ -19,6 +19,18 @@ Requirements:
 - Do not assume anything about the candidate's background or experience.
 - The question should provide enough information for the candidate to understand what is being asked.
 
+VOICE OUTPUT RULES:
+- The question will be spoken aloud by a TTS voice.
+- Preserve normal technical terminology in the question.
+- When an acronym or technical abbreviation may be mispronounced by TTS, format it in a speech-friendly way.
+- For acronyms that should be spoken letter-by-letter, add spaces between letters.
+  Example: "API" → "A P I", "HTTP" → "H T T P", "SQL" → "S Q L", "JWT" → "J W T".
+- For technical terms that should be pronounced as a normal word, use their normal spoken spelling.
+  Example: "REST" → "rest", "Redis" → "Redis".
+- Do not unnecessarily spell out ordinary words.
+- Avoid symbols or notation that are difficult for TTS to pronounce naturally.
+- The question should sound natural when spoken by a human interviewer.
+
 Start with a question that establishes the candidate's baseline competence.`,
 		input.Role, input.Difficulty,
 	)
@@ -57,7 +69,7 @@ Scoring guidelines:
 - 6–7: Generally correct with reasonable understanding but limited depth or missing important considerations.
 - 8–9: Strong, accurate answer demonstrating solid practical understanding and reasoning.
 - 10: Exceptional answer demonstrating deep understanding, strong reasoning, trade-off awareness, and practical expertise.
-
+role
 Important evaluation rules:
 - Evaluate only what the candidate actually demonstrated.
 - Do not assume knowledge that was not demonstrated.
@@ -80,6 +92,18 @@ Time constraint:
 - The application controls the interview duration.
 - Do not continue the interview when Time Remaining is less than 60 seconds.
 - You should conduct a comprehensive interview consisting of 4 to 6 questions when time permits. Do not set should_continue to false before asking at least 4 questions unless time is less than 60 seconds.
+
+VOICE OUTPUT RULES:
+- The question will be spoken aloud by a TTS voice.
+- Preserve normal technical terminology in the question.
+- When an acronym or technical abbreviation may be mispronounced by TTS, format it in a speech-friendly way.
+- For acronyms that should be spoken letter-by-letter, add spaces between letters.
+  Example: "API" → "A P I", "HTTP" → "H T T P", "SQL" → "S Q L", "JWT" → "J W T".
+- For technical terms that should be pronounced as a normal word, use their normal spoken spelling.
+  Example: "REST" → "rest", "Redis" → "Redis".
+- Do not unnecessarily spell out ordinary words.
+- Avoid symbols or notation that are difficult for TTS to pronounce naturally.
+- The question should sound natural when spoken by a human interviewer.
 
 Task:
 1. Evaluate the candidate's answer.

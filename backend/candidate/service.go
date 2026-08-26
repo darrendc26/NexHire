@@ -604,7 +604,6 @@ func (s *Service) GetReportBySessionID(ctx context.Context, sessionID string) (*
 	return s.repo.GetReportBySessionID(ctx, session.ID)
 }
 
-
 func (s *Service) GetSessionByID(ctx context.Context, id string) (*models.CandidateSession, error) {
 	return s.repo.GetSessionByID(ctx, id)
 }
@@ -616,6 +615,32 @@ func (s *Service) GetSessionByToken(ctx context.Context, rawToken string) (*mode
 
 	tokenHash := HashToken(rawToken)
 	return s.repo.GetSessionByTokenHash(ctx, tokenHash)
+}
+
+func (s *Service) ValidateActiveSession(ctx context.Context, rawToken string) (*models.CandidateSession, *models.Interview, error) {
+	session, err := s.GetSessionByToken(ctx, rawToken)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid session token: %w", err)
+	}
+
+	if session.Status != models.SessionActive {
+		return nil, nil, errors.New("candidate session is not active")
+	}
+
+	if !session.ExpiresAt.IsZero() && time.Now().After(session.ExpiresAt) {
+		return nil, nil, errors.New("candidate session has expired")
+	}
+
+	interview, err := s.repo.GetInterviewByID(ctx, session.InterviewID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load interview: %w", err)
+	}
+
+	if interview.Status == models.Closed {
+		return nil, nil, errors.New("interview is closed")
+	}
+
+	return session, interview, nil
 }
 
 func (s *Service) GetSessionsByInterviewID(ctx context.Context, interviewID string) ([]models.CandidateSession, error) {
@@ -646,3 +671,4 @@ func (s *Service) questionsAnsweredCount(responses []models.CandidateResponse) i
 	}
 	return count
 }
+

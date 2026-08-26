@@ -19,6 +19,7 @@ import (
 	"nexhire/backend/candidate"
 	"nexhire/backend/interview"
 	"nexhire/backend/middleware"
+	"nexhire/backend/speech"
 )
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -75,9 +76,9 @@ func initDatabase(dbURL string) (*sql.DB, error) {
 
 	if len(initSQL) > 0 {
 		if _, err := db.Exec(string(initSQL)); err != nil {
-			log.Printf("⚠️ Warning: schema init.sql execution error: %v", err)
+			log.Printf("Warning: schema init.sql execution error: %v", err)
 		} else {
-			log.Println("✅ Database schema initialized from init.sql")
+			log.Println("Database schema initialized from init.sql")
 		}
 	}
 
@@ -94,10 +95,10 @@ func main() {
 
 	db, err := initDatabase(dbURL)
 	if err != nil {
-		log.Fatalf("❌ Fatal: PostgreSQL connection failed: %v", err)
+		log.Fatalf("Fatal: PostgreSQL connection failed: %v", err)
 	}
 
-	log.Println("🐘 Connected to PostgreSQL successfully!")
+	log.Println("Connected to PostgreSQL successfully!")
 	interviewRepo := interview.NewPostgresRepository(db)
 	candidateRepo := candidate.NewPostgresRepository(db)
 
@@ -107,7 +108,7 @@ func main() {
 		ctx := context.Background()
 		client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: geminiAPIKey})
 		if err != nil {
-			log.Printf("⚠️ Warning: Failed to initialize Gemini API client: %v", err)
+			log.Printf("Warning: Failed to initialize Gemini API client: %v", err)
 		} else {
 			geminiModel := os.Getenv("GEMINI_MODEL")
 			if geminiModel == "" {
@@ -115,10 +116,10 @@ func main() {
 			}
 			provider := ai.NewGeminiProvider(client, geminiModel)
 			aiService = ai.NewService(provider)
-			log.Printf("✨ Gemini AI provider initialized with model %s!", geminiModel)
+			log.Printf("Gemini AI provider initialized with model %s!", geminiModel)
 		}
 	} else {
-		log.Println("⚠️ Notice: GEMINI_API_KEY not set in environment.")
+		log.Println("Notice: GEMINI_API_KEY not set in environment.")
 	}
 
 	authService := auth.NewServiceWithDB(cfg, db)
@@ -129,6 +130,9 @@ func main() {
 
 	candidateService := candidate.NewService(candidateRepo, aiService)
 	candidateHandler := candidate.NewHandler(candidateService)
+
+	speechService := speech.NewService()
+	speechHandler := speech.NewHandler(speechService, candidateService)
 
 	ginEngine := gin.New()
 	ginEngine.Use(gin.Recovery())
@@ -157,6 +161,7 @@ func main() {
 
 	interviewHandler.RegisterRoutes(api, ginAuthMiddleware)
 	candidateHandler.RegisterRoutes(api)
+	speechHandler.RegisterRoutes(api)
 
 	mux := http.NewServeMux()
 
@@ -165,6 +170,8 @@ func main() {
 	mux.Handle("/api/interviews/", ginEngine)
 	mux.Handle("/api/candidates", ginEngine)
 	mux.Handle("/api/candidates/", ginEngine)
+	mux.Handle("/api/speech", ginEngine)
+	mux.Handle("/api/speech/", ginEngine)
 
 	// Register auth routes
 	authHandler.RegisterRoutes(mux)
@@ -196,7 +203,6 @@ func main() {
 
 	handler := corsMiddleware(mux)
 
-	fmt.Printf("🚀 NexHire Backend Auth Server running on http://localhost:%s\n", port)
+	fmt.Printf("NexHire Backend Auth Server running on http://localhost:%s\n", port)
 	log.Fatal(http.ListenAndServe(":"+port, handler))
 }
-

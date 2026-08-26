@@ -2,9 +2,6 @@ package candidate
 
 import (
 	"net/http"
-	"strings"
-
-	"nexhire/backend/models"
 
 	"github.com/gin-gonic/gin"
 )
@@ -186,44 +183,6 @@ func (h *Handler) GetReportBySessionID(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"report": report})
 }
 
-// CandidateAuthMiddleware authenticates candidate requests using Bearer raw session token and sets "candidateSession" in gin Context
-func CandidateAuthMiddleware(service *Service) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		rawToken := ""
-
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			rawToken = strings.TrimPrefix(authHeader, "Bearer ")
-		} else if headerToken := c.GetHeader("X-Candidate-Token"); headerToken != "" {
-			rawToken = headerToken
-		} else if paramToken := c.Query("session_token"); paramToken != "" {
-			rawToken = paramToken
-		}
-
-		if rawToken == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: candidate session token required"})
-			c.Abort()
-			return
-		}
-
-		session, err := service.GetSessionByToken(c.Request.Context(), rawToken)
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: invalid candidate session token"})
-			c.Abort()
-			return
-		}
-
-		if session.Status == models.SessionCompleted {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Candidate session has already been completed"})
-			c.Abort()
-			return
-		}
-
-		c.Set("candidateSession", session)
-		c.Next()
-	}
-}
-
 func (h *Handler) RegisterRoutes(router *gin.RouterGroup) {
 	router.GET("/interviews/share/:shareToken", h.GetInterviewByShareToken)
 
@@ -233,9 +192,9 @@ func (h *Handler) RegisterRoutes(router *gin.RouterGroup) {
 	candidates.POST("/:shareToken", h.StartSession)
 	candidates.GET("/token/:shareToken", h.GetInterviewByShareToken)
 	candidates.GET("/session/token/:token", h.GetSessionByToken)
-	candidates.GET("/:id", h.GetSessionByID)
 	candidates.GET("/interview/:interviewID", h.GetSessionsByInterviewID)
 	candidates.GET("/reports/:sessionID", h.GetReportBySessionID)
+	candidates.GET("/:id", h.GetSessionByID)
 
 	// AI turn & report routes
 	candidates.POST("/sessions/:token/start", h.StartSessionQuestion)
