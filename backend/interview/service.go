@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"nexhire/backend/models"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -17,6 +18,7 @@ type Repository interface {
 	GetByRecruiterID(ctx context.Context, recruiterID string) ([]models.Interview, error)
 	Update(ctx context.Context, interview *models.Interview) error
 	Delete(ctx context.Context, id string) error
+	AddCandidateEmail(ctx context.Context, interviewID string, email string, candidateName string) error
 }
 
 type Service struct {
@@ -139,3 +141,33 @@ func (s *Service) Delete(ctx context.Context, id string, recruiterID string) err
 	return s.repo.Delete(ctx, id)
 }
 
+type AddCandidateEmailRequest struct {
+	Email         string `json:"email" binding:"required,email"`
+	CandidateName string `json:"candidate_name" `
+}
+
+func (s *Service) AddCandidateEmail(
+	ctx context.Context,
+	interviewID string,
+	recruiterID string,
+	req AddCandidateEmailRequest,
+) error {
+	// Verify recruiter owns this interview.
+	interview, err := s.repo.GetByID(ctx, interviewID)
+	if err != nil {
+		return err
+	}
+
+	if interview.RecruiterID != recruiterID {
+		return errors.New("you do not have access to this interview")
+	}
+
+	// Normalize email before storing.
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+
+	if email == "" {
+		return errors.New("email is required")
+	}
+
+	return s.repo.AddCandidateEmail(ctx, interviewID, email, req.CandidateName)
+}

@@ -147,4 +147,29 @@ export async function deleteInterview(id: string, token?: string): Promise<void>
   }
 }
 
+export async function addCandidateEmail(
+  interviewId: string,
+  email: string
+) {
+  const response = await fetch(
+    `${BASE_URL}/api/interviews/${interviewId}/candidates`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${getStoredToken()}`,
+      },
+      body: JSON.stringify({
+        email: email.trim().toLowerCase(),
+      }),
+    }
+  );
 
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to add candidate');
+  }
+
+  return data;
+}

@@ -30,7 +30,14 @@ func generateWithRetry(
 	schema *genai.Schema,
 ) (*genai.GenerateContentResponse, error) {
 	var lastErr error
-	for attempt := 0; attempt < 5; attempt++ {
+	for attempt := 0; attempt < 3; attempt++ {
+		if err := ctx.Err(); err != nil {
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return nil, err
+		}
+
 		result, err := client.Models.GenerateContent(
 			ctx,
 			model,
@@ -44,13 +51,19 @@ func generateWithRetry(
 			return result, nil
 		}
 		lastErr = err
+
+		wait := 2 * time.Second
 		errStr := err.Error()
 		if strings.Contains(errStr, "429") || strings.Contains(errStr, "RESOURCE_EXHAUSTED") {
-			time.Sleep(52 * time.Second)
+			wait = 4 * time.Second
 		} else if strings.Contains(errStr, "503") || strings.Contains(errStr, "UNAVAILABLE") {
-			time.Sleep(time.Duration(1<<attempt) * 2 * time.Second)
-		} else {
-			time.Sleep(2 * time.Second)
+			wait = time.Duration(1<<attempt) * time.Second
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, lastErr
+		case <-time.After(wait):
 		}
 	}
 	return nil, lastErr

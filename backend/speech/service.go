@@ -34,7 +34,7 @@ func (s *Service) GenerateSTTToken(ctx context.Context) (string, error) {
 	}
 
 	grantReq := deepgramGrantRequest{
-		TTLSeconds: 120,
+		TTLSeconds: 1800,
 	}
 
 	reqBytes, err := json.Marshal(grantReq)

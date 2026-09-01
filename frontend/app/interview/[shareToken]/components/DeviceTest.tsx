@@ -15,14 +15,30 @@ import {
   Radio,
   Sparkles,
 } from 'lucide-react';
+import { unlockPlayback } from '@/lib/audioSession';
+// import {
+//   Mic,
+//   MicOff,
+//   Volume2,
+//   VolumeX,
+//   CheckCircle2,
+//   AlertCircle,
+//   Play,
+//   RotateCcw,
+//   ArrowRight,
+//   ShieldCheck,
+//   Radio,
+//   Sparkles,
+// } from 'lucide-react';
 
 type DeviceTestProps = {
   candidateName: string;
   onProceed: () => void;
   loading?: boolean;
+  error?: string | null;
 };
 
-export default function DeviceTest({ candidateName, onProceed, loading = false }: DeviceTestProps) {
+export default function DeviceTest({ candidateName, onProceed, loading = false, error }: DeviceTestProps) {
   // Mic state
   const [micPermission, setMicPermission] = useState<'prompt' | 'granted' | 'denied'>('prompt');
   const [micActive, setMicActive] = useState(false);
@@ -151,14 +167,15 @@ export default function DeviceTest({ candidateName, onProceed, loading = false }
   };
 
   // Play synthetic test sound for speaker verification
-  const playTestSound = () => {
+  const playTestSound = async () => {
     setIsPlayingTestSound(true);
 
     try {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      const ctx = new AudioCtx();
+      const ctx = await unlockPlayback();
+      if (!ctx) {
+        throw new Error('Web Audio is not available');
+      }
 
-      // Create melodic 3-tone chime sequence (C5 -> E5 -> G5)
       const notes = [523.25, 659.25, 783.99];
       const now = ctx.currentTime;
 
@@ -183,7 +200,6 @@ export default function DeviceTest({ candidateName, onProceed, loading = false }
       setTimeout(() => {
         setIsPlayingTestSound(false);
         setSpeakerTested(true);
-        ctx.close().catch(() => {});
       }, 1200);
     } catch (err) {
       console.error('Error playing synth test sound:', err);
@@ -478,9 +494,32 @@ export default function DeviceTest({ candidateName, onProceed, loading = false }
         </div>
 
         {/* PROCEED BUTTON */}
+        {error && (
+          <div
+            style={{
+              background: '#fef2f2',
+              border: '1px solid #fecaca',
+              color: '#991b1b',
+              padding: '0.75rem 1rem',
+              borderRadius: '8px',
+              fontSize: '0.875rem',
+              marginBottom: '1rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+            }}
+          >
+            <AlertCircle size={16} /> {error}
+          </div>
+        )}
+
         <button
           type="button"
-          onClick={onProceed}
+            onClick={() => {
+            void unlockPlayback();
+            stopMicStream();
+            onProceed();
+          }}
           disabled={!isReadyToProceed || loading}
           className="btn-primary"
           id="btn-proceed-to-interview"

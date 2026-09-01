@@ -12,5 +12,12 @@ services:
       - nexhire-db-data:/var/lib/postgresql/data
       - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
 
+  redis:
+    image: redis:7-alpine
+    container_name: nexhire-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+      
 volumes:
   nexhire-db-data:

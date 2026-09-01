@@ -20,6 +20,7 @@ import (
 	"nexhire/backend/interview"
 	"nexhire/backend/middleware"
 	"nexhire/backend/speech"
+	"nexhire/backend/utils"
 )
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -122,13 +123,20 @@ func main() {
 		log.Println("Notice: GEMINI_API_KEY not set in environment.")
 	}
 
+	redisClient := utils.NewRedisClient()
+	if err := redisClient.Ping(context.Background()).Err(); err != nil {
+		log.Fatalf("Redis connection failed: %v", err)
+	}
+
+	log.Println("Redis connected")
+
 	authService := auth.NewServiceWithDB(cfg, db)
 	authHandler := auth.NewHandler(authService, cfg)
 
 	interviewService := interview.NewService(interviewRepo)
 	interviewHandler := interview.NewHandler(interviewService)
 
-	candidateService := candidate.NewService(candidateRepo, aiService)
+	candidateService := candidate.NewService(candidateRepo, aiService, redisClient)
 	candidateHandler := candidate.NewHandler(candidateService)
 
 	speechService := speech.NewService()

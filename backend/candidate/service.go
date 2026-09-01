@@ -6,12 +6,17 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/rand"
+	"strconv"
+	"strings"
 	"time"
 
 	"nexhire/backend/ai"
 	"nexhire/backend/models"
+	"nexhire/backend/utils"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -20,14 +25,16 @@ const (
 )
 
 type Service struct {
-	repo      Repository
-	aiService *ai.Service
+	repo        Repository
+	aiService   *ai.Service
+	redisClient *redis.Client
 }
 
-func NewService(repo Repository, aiService *ai.Service) *Service {
+func NewService(repo Repository, aiService *ai.Service, redisClient *redis.Client) *Service {
 	return &Service{
-		repo:      repo,
-		aiService: aiService,
+		repo:        repo,
+		aiService:   aiService,
+		redisClient: redisClient,
 	}
 }
 
@@ -108,6 +115,10 @@ func (s *Service) StartSession(
 		return nil, errors.New("interview is closed")
 	}
 
+	if err := s.requireVerifiedEmail(ctx, req.Email, interview.ID); err != nil {
+		return nil, err
+	}
+
 	duration := interview.Duration
 	if duration <= 0 {
 		duration = 15 // Default 15 minutes
@@ -133,6 +144,8 @@ func (s *Service) StartSession(
 	if err := s.repo.CreateSession(ctx, session); err != nil {
 		return nil, fmt.Errorf("failed to create candidate session: %w", err)
 	}
+
+	s.consumeVerifiedEmail(ctx, req.Email, interview.ID)
 
 	return session, nil
 }
@@ -187,9 +200,23 @@ func (s *Service) StartSessionQuestion(ctx context.Context, rawToken string) (*S
 		TimeRemaining:  timeRemaining,
 	}
 
-	turn, err := s.aiService.GenerateInitialQuestion(ctx, aiCtx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate initial AI question: %w", err)
+	qCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	turn, err := s.aiService.GenerateInitialQuestion(qCtx, aiCtx)
+	if err != nil || turn == nil || strings.TrimSpace(turn.NextQuestion) == "" {
+		role := interview.Role
+		if strings.TrimSpace(role) == "" {
+			role = "this"
+		}
+		turn = &ai.InterviewTurn{
+			NextQuestion: fmt.Sprintf(
+				"Let's begin. For the %s role, tell me about a recent project you owned — what problem you solved, and the decisions you made along the way.",
+				role,
+			),
+			QuestionType:   "opening",
+			ShouldContinue: true,
+		}
 	}
 
 	qResp := &models.CandidateResponse{
@@ -672,3 +699,113 @@ func (s *Service) questionsAnsweredCount(responses []models.CandidateResponse) i
 	return count
 }
 
+var (
+	ErrOTPExpired      = errors.New("OTP has expired or is invalid")
+	ErrOTPInvalid      = errors.New("invalid OTP")
+	ErrEmailUnverified = errors.New("email is not verified")
+)
+
+func emailIdentityHash(email string) string {
+	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(email))))
+	return hex.EncodeToString(sum[:])
+}
+
+func otpRedisKey(interviewID, email string) string {
+	return "nexhire:otp:" + interviewID + ":" + emailIdentityHash(email)
+}
+
+func verifiedRedisKey(interviewID, email string) string {
+	return "nexhire:verified:" + interviewID + ":" + emailIdentityHash(email)
+}
+
+func (s *Service) SendEmailOtp(
+	ctx context.Context,
+	email string,
+	interviewID string,
+) error {
+	if s.redisClient == nil {
+		return errors.New("email verification is unavailable")
+	}
+
+	otp := rand.Intn(900000) + 100000
+	otpHash := sha256.Sum256([]byte(strconv.Itoa(otp)))
+
+	err := s.redisClient.Set(
+		ctx,
+		otpRedisKey(interviewID, email),
+		hex.EncodeToString(otpHash[:]),
+		5*time.Minute,
+	).Err()
+	if err != nil {
+		return fmt.Errorf("failed to store OTP in Redis: %w", err)
+	}
+
+	if err := utils.NewService().SendOTP(ctx, email, strconv.Itoa(otp)); err != nil {
+		_ = s.redisClient.Del(ctx, otpRedisKey(interviewID, email)).Err()
+		return fmt.Errorf("failed to send verification email: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Service) VerifyEmailOTP(
+	ctx context.Context,
+	email string,
+	interviewID string,
+	otp string,
+) error {
+	if s.redisClient == nil {
+		return errors.New("email verification is unavailable")
+	}
+
+	otp = strings.TrimSpace(otp)
+	if len(otp) != 6 {
+		return ErrOTPInvalid
+	}
+
+	key := otpRedisKey(interviewID, email)
+	storedHash, err := s.redisClient.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return ErrOTPExpired
+	}
+	if err != nil {
+		return fmt.Errorf("failed to retrieve OTP from Redis: %w", err)
+	}
+
+	otpHash := sha256.Sum256([]byte(otp))
+	if storedHash != hex.EncodeToString(otpHash[:]) {
+		return ErrOTPInvalid
+	}
+
+	if err := s.redisClient.Del(ctx, key).Err(); err != nil {
+		return fmt.Errorf("failed to delete OTP from Redis: %w", err)
+	}
+
+	if err := s.redisClient.Set(ctx, verifiedRedisKey(interviewID, email), "1", 30*time.Minute).Err(); err != nil {
+		return fmt.Errorf("failed to mark email as verified: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Service) requireVerifiedEmail(ctx context.Context, email, interviewID string) error {
+	if s.redisClient == nil {
+		return errors.New("email verification is unavailable")
+	}
+
+	_, err := s.redisClient.Get(ctx, verifiedRedisKey(interviewID, email)).Result()
+	if err == redis.Nil {
+		return ErrEmailUnverified
+	}
+	if err != nil {
+		return fmt.Errorf("failed to check email verification: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) consumeVerifiedEmail(ctx context.Context, email, interviewID string) {
+	if s.redisClient == nil {
+		return
+	}
+	_ = s.redisClient.Del(ctx, verifiedRedisKey(interviewID, email)).Err()
+}

@@ -152,6 +152,42 @@ func (h *Handler) Delete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "interview deleted successfully"})
 }
 
+func (h *Handler) AddCandidateEmail(c *gin.Context) {
+	interviewID := c.Param("id")
+
+	rawUserID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	recruiterID, ok := rawUserID.(string)
+	if !ok || recruiterID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user"})
+		return
+	}
+
+	var req AddCandidateEmailRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.service.AddCandidateEmail(
+		c.Request.Context(),
+		interviewID,
+		recruiterID,
+		req,
+	); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "candidate email added successfully",
+	})
+}
+
 func (h *Handler) RegisterRoutes(
 	router *gin.RouterGroup,
 	authMiddleware gin.HandlerFunc,
@@ -166,6 +202,6 @@ func (h *Handler) RegisterRoutes(
 		interviews.GET("", h.GetMyInterviews)
 		interviews.GET("/:id", h.Get)
 		interviews.DELETE("/:id", h.Delete)
+		interviews.POST("/:id/candidates", h.AddCandidateEmail)
 	}
 }
-

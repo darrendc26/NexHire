@@ -87,6 +87,65 @@ export async function getInterviewByShareToken(shareToken: string): Promise<Inte
   };
 }
 
+function mapEmailVerificationError(raw: string, fallback: string): string {
+  const message = raw.toLowerCase();
+  if (message.includes('invalid otp')) {
+    return 'That code is incorrect. Please try again.';
+  }
+  if (message.includes('expired') || message.includes('otp has expired')) {
+    return 'This code has expired. Request a new one.';
+  }
+  if (message.includes('email is not verified')) {
+    return 'Please verify your email before starting the interview.';
+  }
+  if (message.includes('api key is invalid')) {
+    return 'The Resend API key is invalid. Check RESEND_API_KEY in backend/.env.';
+  }
+  if (message.includes('domain is not verified')) {
+    return 'EMAIL_FROM must use a domain verified in Resend (or beth.t@example.com for testing).';
+  }
+  if (message.includes('testing email address') || message.includes('only send testing emails')) {
+    return 'Resend test sending only allows your Resend account email until you verify a domain.';
+  }
+  if (message.includes('failed to send verification email')) {
+    return 'Could not send the verification email. Please try again in a moment.';
+  }
+  if (message.includes('failed on the \'email\' tag') || message.includes('failed on the "email" tag')) {
+    return 'Please enter a valid email address.';
+  }
+  return raw || fallback;
+}
+
+export async function sendEmailOTP(email: string, interviewId: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/candidates/send-otp`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, interview_id: interviewId }),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(
+      mapEmailVerificationError(errorData.error || '', `Failed to send verification code (status ${res.status})`)
+    );
+  }
+}
+
+export async function verifyEmailOTP(email: string, interviewId: string, otp: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/candidates/verify-otp`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, interview_id: interviewId, otp }),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(
+      mapEmailVerificationError(errorData.error || '', `Failed to verify code (status ${res.status})`)
+    );
+  }
+}
+
 export async function createCandidateSession(
   shareToken: string,
   name: string,
@@ -102,7 +161,9 @@ export async function createCandidateSession(
 
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.error || `Failed to create session (status ${res.status})`);
+    throw new Error(
+      mapEmailVerificationError(errorData.error || '', `Failed to create session (status ${res.status})`)
+    );
   }
 
   const data = await res.json();
@@ -116,20 +177,40 @@ export async function createCandidateSession(
 }
 
 export async function startInterviewSession(sessionToken: string): Promise<StartQuestionResponse> {
-  const res = await fetch(`${BASE_URL}/api/candidates/sessions/${encodeURIComponent(sessionToken)}/start`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${sessionToken}`,
-    },
-  });
+  const url = `${BASE_URL}/api/candidates/sessions/${encodeURIComponent(sessionToken)}/start`;
+  let lastError: Error | null = null;
 
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.error || `Failed to start interview (status ${res.status})`);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+        },
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to start interview (status ${res.status})`);
+      }
+
+      return await res.json();
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error('Failed to start interview');
+      const retryable =
+        lastError.message.includes('socket hang up') ||
+        lastError.message.includes('Failed to fetch') ||
+        lastError.message.includes('ECONNRESET') ||
+        lastError.message.includes('Backend is not reachable');
+      if (!retryable || attempt === 2) {
+        throw lastError;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 600 * (attempt + 1)));
+    }
   }
 
-  return await res.json();
+  throw lastError || new Error('Failed to start interview');
 }
 
 export type SkillScore = {
@@ -180,6 +261,23 @@ export async function getCandidateReport(sessionToken: string): Promise<Candidat
   if (!res.ok) return null;
   const data = await res.json();
   return data.report || null;
+}
+
+export async function fetchTTSAudio(text: string): Promise<Blob> {
+  const res = await fetch(`${BASE_URL}/api/candidates/tts`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ text }),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Failed to generate speech (status ${res.status})`);
+  }
+
+  return await res.blob();
 }
 
 export async function getSTTToken(sessionToken: string): Promise<string> {

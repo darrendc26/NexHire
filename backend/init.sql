@@ -77,6 +77,24 @@ CREATE TABLE IF NOT EXISTS candidate_reports (
     CONSTRAINT fk_report_session FOREIGN KEY (session_id) REFERENCES candidate_sessions(id) ON DELETE CASCADE
 );
 
+--Interview Invitation Table
+CREATE TABLE IF NOT EXISTS interview_candidates (
+    id VARCHAR(64) PRIMARY KEY,
+    interview_id VARCHAR(64) NOT NULL,
+    email VARCHAR(320) NOT NULL,
+    name VARCHAR(255),
+    status VARCHAR(32) NOT NULL DEFAULT 'invited',
+    verified_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_interview_candidate_interview FOREIGN KEY (interview_id) REFERENCES interviews(id) ON DELETE CASCADE,
+    CONSTRAINT uq_interview_candidate_email UNIQUE (interview_id, email)
+);
+
+CREATE INDEX idx_interview_candidates_email ON interview_candidates(email);
+
+
+
 -- Indexes for Query Performance
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id);

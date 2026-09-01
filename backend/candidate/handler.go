@@ -1,6 +1,7 @@
 package candidate
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -33,14 +34,22 @@ func (h *Handler) StartSession(c *gin.Context) {
 
 	session, err := h.service.StartSession(c, shareToken, req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		status := http.StatusInternalServerError
+		if errors.Is(err, ErrEmailUnverified) {
+			status = http.StatusForbidden
+		} else if err.Error() == "name and email are required" ||
+			err.Error() == "share token or interview_id is required" ||
+			err.Error() == "interview is closed" {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"session_id":    session.ID,
 		"session_token": session.RawToken,
-		"status":       string(session.Status),
+		"status":        string(session.Status),
 		"session": StartSessionResponse{
 			SessionID:    session.ID,
 			SessionToken: session.RawToken,
@@ -99,7 +108,7 @@ func (h *Handler) GetInterviewByShareToken(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"interview": interview,
+		"interview":   interview,
 		"title":       interview.Title,
 		"role":        interview.Role,
 		"difficulty":  interview.Difficulty,
@@ -183,11 +192,60 @@ func (h *Handler) GetReportBySessionID(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"report": report})
 }
 
+type SendEmailOTPRequest struct {
+	Email       string `json:"email" binding:"required,email"`
+	InterviewID string `json:"interview_id" binding:"required"`
+}
+
+func (h *Handler) SendEmailOTP(c *gin.Context) {
+	var req SendEmailOTPRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	err := h.service.SendEmailOtp(c.Request.Context(), req.Email, req.InterviewID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "OTP sent successfully"})
+}
+
+type VerifyEmailOTPRequest struct {
+	Email       string `json:"email" binding:"required,email"`
+	InterviewID string `json:"interview_id" binding:"required"`
+	OTP         string `json:"otp" binding:"required"`
+}
+
+func (h *Handler) VerifyEmailOTP(c *gin.Context) {
+	var req VerifyEmailOTPRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	err := h.service.VerifyEmailOTP(c.Request.Context(), req.Email, req.InterviewID, req.OTP)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, ErrOTPExpired) || errors.Is(err, ErrOTPInvalid) {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Email verified successfully"})
+}
+
 func (h *Handler) RegisterRoutes(router *gin.RouterGroup) {
 	router.GET("/interviews/share/:shareToken", h.GetInterviewByShareToken)
 
 	candidates := router.Group("/candidates")
 
+	candidates.POST("/send-otp", h.SendEmailOTP)
+	candidates.POST("/verify-otp", h.VerifyEmailOTP)
 	candidates.POST("", h.StartSession)
 	candidates.POST("/:shareToken", h.StartSession)
 	candidates.GET("/token/:shareToken", h.GetInterviewByShareToken)
@@ -201,5 +259,3 @@ func (h *Handler) RegisterRoutes(router *gin.RouterGroup) {
 	candidates.POST("/sessions/:token/answer", h.SubmitAnswer)
 	candidates.GET("/sessions/:token/report", h.GetReport)
 }
-
-

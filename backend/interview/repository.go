@@ -5,9 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"nexhire/backend/models"
+
+	"github.com/google/uuid"
 )
 
 // PostgresRepository implements Repository using PostgreSQL database
@@ -185,6 +188,48 @@ func (r *PostgresRepository) Delete(ctx context.Context, id string) error {
 
 	if rowsAffected == 0 {
 		return errors.New("interview not found")
+	}
+
+	return nil
+}
+
+func (r *PostgresRepository) AddCandidateEmail(
+	ctx context.Context,
+	interviewID string,
+	email string,
+	candidateName string,
+) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+
+	if email == "" {
+		return errors.New("email is required")
+	}
+
+	name := strings.TrimSpace(candidateName)
+	id := uuid.New().String()
+
+	query := `
+		INSERT INTO interview_candidates (
+			id,
+			interview_id,
+			email,
+			name
+		)
+		VALUES ($1, $2, $3, $4)
+			ON CONFLICT (interview_id, email) DO NOTHING
+
+	`
+
+	_, err := r.db.ExecContext(
+		ctx,
+		query,
+		id,
+		interviewID,
+		email,
+		name,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to add candidate email: %w", err)
 	}
 
 	return nil

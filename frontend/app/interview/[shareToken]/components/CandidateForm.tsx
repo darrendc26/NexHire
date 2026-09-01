@@ -7,11 +7,19 @@ type CandidateFormProps = {
   onSubmit: (name: string, email: string) => Promise<void>;
   loading: boolean;
   error?: string | null;
+  initialName?: string;
+  initialEmail?: string;
 };
 
-export default function CandidateForm({ onSubmit, loading, error }: CandidateFormProps) {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
+export default function CandidateForm({
+  onSubmit,
+  loading,
+  error,
+  initialName = '',
+  initialEmail = '',
+}: CandidateFormProps) {
+  const [name, setName] = useState(initialName);
+  const [email, setEmail] = useState(initialEmail);
   const [localError, setLocalError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -48,7 +56,7 @@ export default function CandidateForm({ onSubmit, loading, error }: CandidateFor
           Candidate Registration
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1.75rem', textAlign: 'center' }}>
-          Please enter your details to begin your AI technical interview.
+          Please enter your details so we can verify your email before the interview.
         </p>
 
         {displayError && (
@@ -137,10 +145,10 @@ export default function CandidateForm({ onSubmit, loading, error }: CandidateFor
             style={{ marginTop: '0.75rem' }}
           >
             {loading ? (
-              <>Creating Session...</>
+              <>Sending code...</>
             ) : (
               <>
-                Begin Interview <Sparkles size={18} />
+                Send verification code <Sparkles size={18} />
               </>
             )}
           </button>
